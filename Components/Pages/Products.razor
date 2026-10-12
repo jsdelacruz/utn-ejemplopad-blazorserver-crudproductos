@@ -1,0 +1,227 @@
+@page "/productos"
+@rendermode InteractiveServer
+@using blazorvacio.Data
+@inject ProductService ProductService
+@inject IJSRuntime JS
+@inject ILogger<Products> Logger
+
+<PageTitle>Productos</PageTitle>
+
+<section class="products-page">
+    <header class="products-heading">
+        <div>
+            <p class="eyebrow">INVENTARIO</p>
+            <h1>Productos</h1>
+        </div>
+        <div class="product-count"><strong>@products.Count</strong><span>productos registrados</span></div>
+    </header>
+
+    @if (!string.IsNullOrEmpty(statusMessage))
+    {
+        <div class="alert alert-success" role="status">@statusMessage</div>
+    }
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger" role="alert">@errorMessage</div>
+    }
+
+    <div class="products-workspace">
+        <section class="product-editor" aria-labelledby="editor-title">
+            <div class="section-heading">
+                <span class="section-index">@(editing ? "02" : "01")</span>
+                <h2 id="editor-title">@(editing ? "Editar producto" : "Nuevo producto")</h2>
+            </div>
+
+            <EditForm Model="productDraft" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+                <div class="field-group">
+                    <label for="product-name">Nombre</label>
+                    <InputText id="product-name" class="form-control" @bind-Value="productDraft.Name" placeholder="Ej. Cuaderno A5" />
+                    <ValidationMessage For="@(() => productDraft.Name)" />
+                </div>
+                <div class="field-group">
+                    <label for="product-description">Descripción <span>Opcional</span></label>
+                    <InputTextArea id="product-description" class="form-control" @bind-Value="productDraft.Description" rows="3" placeholder="Detalles del producto" />
+                    <ValidationMessage For="@(() => productDraft.Description)" />
+                </div>
+                <div class="field-row">
+                    <div class="field-group">
+                        <label for="product-price">Precio</label>
+                        <InputNumber id="product-price" class="form-control" @bind-Value="productDraft.Price" min="0" step="0.01" />
+                        <ValidationMessage For="@(() => productDraft.Price)" />
+                    </div>
+                    <div class="field-group">
+                        <label for="product-stock">Existencias</label>
+                        <InputNumber id="product-stock" class="form-control" @bind-Value="productDraft.Stock" min="0" step="1" />
+                        <ValidationMessage For="@(() => productDraft.Stock)" />
+                    </div>
+                </div>
+                <div class="editor-actions">
+                    <button class="btn btn-primary" type="submit">@(editing ? "Guardar cambios" : "Agregar producto")</button>
+                    @if (editing)
+                    {
+                        <button class="btn btn-link" type="button" @onclick="CancelEditing">Cancelar</button>
+                    }
+                </div>
+            </EditForm>
+        </section>
+
+        <section class="product-list" aria-labelledby="list-title">
+            <div class="section-heading list-heading">
+                <span class="section-index">LISTA</span>
+                <h2 id="list-title">Inventario actual</h2>
+            </div>
+
+            @if (products.Count == 0)
+            {
+                <div class="empty-state">
+                    <p class="empty-title">Aún no hay productos</p>
+                    <p>Agrega el primero usando el formulario.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table products-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Producto</th>
+                                <th scope="col">Precio</th>
+                                <th scope="col">Stock</th>
+                                <th scope="col"><span class="visually-hidden">Acciones</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var product in products)
+                            {
+                                <tr @key="product.Id">
+                                    <td>
+                                        <span class="product-name">@product.Name</span>
+                                        @if (!string.IsNullOrWhiteSpace(product.Description))
+                                        {
+                                            <span class="product-description">@product.Description</span>
+                                        }
+                                    </td>
+                                    <td class="price-cell">@product.Price.ToString("C")</td>
+                                    <td><span class="stock-value @(product.Stock == 0 ? "out-of-stock" : null)">@product.Stock</span></td>
+                                    <td>
+                                        <div class="row-actions">
+                                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="() => StartEditing(product)">Editar</button>
+                                            <button class="btn btn-sm btn-outline-danger" type="button" @onclick="() => DeleteAsync(product)">Eliminar</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    private List<Product> products = [];
+    private Product productDraft = new();
+    private bool editing;
+    private string? statusMessage;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProductsAsync();
+    }
+
+    private async Task LoadProductsAsync()
+    {
+        try
+        {
+            products = await ProductService.GetAllAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "No se pudo cargar el inventario.");
+            errorMessage = "No se pudo cargar el inventario. Intenta recargar la página.";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        ClearMessages();
+        try
+        {
+            if (editing)
+            {
+                await ProductService.UpdateAsync(productDraft);
+                statusMessage = "Producto actualizado.";
+            }
+            else
+            {
+                await ProductService.CreateAsync(productDraft);
+                statusMessage = "Producto agregado.";
+            }
+
+            productDraft = new Product();
+            editing = false;
+            await LoadProductsAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "No se pudo guardar el producto.");
+            errorMessage = "No se pudo guardar el producto. Intenta de nuevo.";
+        }
+    }
+
+    private void StartEditing(Product product)
+    {
+        ClearMessages();
+        productDraft = new Product
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Description = product.Description,
+            Price = product.Price,
+            Stock = product.Stock
+        };
+        editing = true;
+    }
+
+    private void CancelEditing()
+    {
+        productDraft = new Product();
+        editing = false;
+        ClearMessages();
+    }
+
+    private async Task DeleteAsync(Product product)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"¿Eliminar '{product.Name}'?");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        ClearMessages();
+        try
+        {
+            await ProductService.DeleteAsync(product.Id);
+            if (editing && productDraft.Id == product.Id)
+            {
+                CancelEditing();
+            }
+            statusMessage = "Producto eliminado.";
+            await LoadProductsAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "No se pudo eliminar el producto {ProductId}.", product.Id);
+            errorMessage = "No se pudo eliminar el producto. Intenta de nuevo.";
+        }
+    }
+
+    private void ClearMessages()
+    {
+        statusMessage = null;
+        errorMessage = null;
+    }
+}
